@@ -364,8 +364,11 @@ export function parseQuotaData(provider, data) {
       case "antigravity":
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([modelKey, quota]) => {
+            let cleanName = (quota.displayName || modelKey)
+              .replace(/\s+models?/gi, "")
+              .replace(/Claude and GPT/gi, "Claude & GPT");
             normalizedQuotas.push({
-              name: quota.displayName || modelKey,
+              name: cleanName,
               modelKey: modelKey, // Keep modelKey for sorting
               used: quota.used || 0,
               total: quota.total || 0,

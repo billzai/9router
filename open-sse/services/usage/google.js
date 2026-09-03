@@ -169,13 +169,18 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
           const used = Math.round(1000 * (1 - frac));
           const windowKey = bucket.window === "5h" ? "5h" : "7d";
 
+          const cleanGroup = String(group.displayName || "")
+            .replace(/\s+models?/i, "")
+            .replace(/Claude and GPT/i, "Claude & GPT")
+            .trim();
+
           quotas[bucket.bucketId] = {
             used,
             total: 1000,
             resetAt: parseResetTime(bucket.resetTime),
             remainingPercentage: pct,
             unlimited: false,
-            displayName: `${group.displayName} (${windowKey})`,
+            displayName: `${cleanGroup} (${windowKey})`,
           };
         }
       }
