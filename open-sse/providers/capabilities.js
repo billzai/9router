@@ -146,6 +146,8 @@ const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true,
 // (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
 const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
 const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+const CODEX_GPT_FLAGSHIP_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 };
+const CODEX_GPT_MINI_CAPS     = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 };
 
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
@@ -167,6 +169,14 @@ export const PROVIDER_CAPABILITIES = {
     "gpt-5.6-terra-review":      CODEX_GPT_56_DEFAULT_CAPS,
     "gpt-5.6-luna":              CODEX_GPT_56_DEFAULT_CAPS,
     "gpt-5.6-luna-review":       CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.5":                   CODEX_GPT_FLAGSHIP_CAPS,
+    "gpt-5.5-review":            CODEX_GPT_FLAGSHIP_CAPS,
+    "gpt-5.4":                   CODEX_GPT_FLAGSHIP_CAPS,
+    "gpt-5.4-review":            CODEX_GPT_FLAGSHIP_CAPS,
+    "gpt-5.4-mini":              CODEX_GPT_MINI_CAPS,
+    "gpt-5.4-mini-review":       CODEX_GPT_MINI_CAPS,
+    "gpt-5.3-codex-spark":       CODEX_GPT_FLAGSHIP_CAPS,
+    "gpt-5.3-codex-spark-review": CODEX_GPT_FLAGSHIP_CAPS,
   },
   "kiro": {
     "gpt-5.6-sol": KIRO_GPT_5_6_CAPABILITIES,
