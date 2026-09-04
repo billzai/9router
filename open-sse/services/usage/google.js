@@ -184,6 +184,47 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
           };
         }
       }
+    } else if (data.models) {
+      const importantModels = [
+        'gemini-3.8-flash-high',
+        'gemini-3.8-flash-medium',
+        'gemini-3.8-flash-low',
+        'gemini-3.7-flash-high',
+        'gemini-3.7-flash-medium',
+        'gemini-3.7-flash-low',
+        'gemini-3.6-flash-high',
+        'gemini-3.6-flash-medium',
+        'gemini-3.6-flash-low',
+        'gemini-3.5-flash-low',
+        'gemini-3.5-flash-extra-low',
+        'gemini-pro-agent',
+        'gemini-3.1-pro-low',
+        'claude-sonnet-4-6',
+        'claude-opus-4-6-thinking',
+        'gpt-oss-120b-medium',
+        'gemini-3.1-flash-image',
+      ];
+
+      for (const [modelKey, info] of Object.entries(data.models)) {
+        if (!info.quotaInfo || info.isInternal || !importantModels.includes(modelKey)) {
+          continue;
+        }
+
+        const remainingFraction = info.quotaInfo.remainingFraction || 0;
+        const remainingPercentage = remainingFraction * 100;
+        const total = 1000;
+        const remaining = Math.round(total * remainingFraction);
+        const used = total - remaining;
+
+        quotas[modelKey] = {
+          used,
+          total,
+          resetAt: parseResetTime(info.quotaInfo.resetTime),
+          remainingPercentage,
+          unlimited: false,
+          displayName: info.displayName || modelKey,
+        };
+      }
     }
 
     // Fetch plan name from subscription info
