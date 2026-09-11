@@ -657,3 +657,29 @@ export function parseQuotaData(provider, data) {
 
   return normalizedQuotas;
 }
+
+export function getCodeBuddyCredits(quota) {
+  if (quota?.raw?.summary) {
+    return {
+      total: Number(quota.raw.summary.totalCapacity) || 0,
+      used: Number(quota.raw.summary.totalUsed) || 0,
+      remaining: Number(quota.raw.summary.totalRemaining) || 0,
+    };
+  }
+  let total = 0;
+  let used = 0;
+  let remaining = 0;
+  for (const q of quota?.quotas || []) {
+    const t = Number(q.total) || 0;
+    const u = Number(q.used) || 0;
+    const r = q.remaining !== undefined ? Number(q.remaining) : Math.max(0, t - u);
+    total += t;
+    used += u;
+    remaining += r;
+  }
+  return {
+    total: Number(total.toFixed(2)),
+    used: Number(used.toFixed(2)),
+    remaining: Number(remaining.toFixed(2)),
+  };
+}
