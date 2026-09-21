@@ -739,34 +739,338 @@ function formatLogDate(date = new Date()) {
 // No-op: request log is now derived from usageHistory table on read.
 export async function appendRequestLog() {}
 
-export async function getRecentLogs(limit = 200) {
+
+// ── 10router dashboard v2 ──────────────────────────────────────────────
+
+function latencyScoreFromMs(avgMs) {
+  if (avgMs == null) return null;
+  return Math.max(0, Math.min(100, Math.round(100 - ((avgMs - 500) / 7500) * 100)));
+}
+
+function speedScoreFromTps(tps) {
+  if (tps == null) return null;
+  return Math.max(0, Math.min(100, Math.round((tps / 60) * 100)));
+}
+
+function computeScore(successRate, latencyScore, speedScore) {
+  if (successRate == null) return null;
+  const ls = latencyScore == null ? 50 : latencyScore;
+  const ss = speedScore == null ? 50 : speedScore;
+  return Math.round(successRate * 0.6 + ls * 0.2 + ss * 0.2);
+}
+
+function round1(n) { return Math.round(n * 10) / 10; }
+
+function localDayKey(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+export function modelFamilyName(model) {
+  model = model || '';
+  const m = model.toLowerCase();
+  if (m.includes('gpt-4o') || m.includes('gpt-4-turbo')) return 'GPT-4o';
+  if (m.includes('gpt-4')) return 'GPT-4';
+  if (m.includes('gpt-3.5')) return 'GPT-3.5';
+  if (m.includes('claude-opus')) return 'Claude Opus';
+  if (m.includes('claude-sonnet')) return 'Claude Sonnet';
+  if (m.includes('claude-haiku')) return 'Claude Haiku';
+  if (m.includes('gemini-3.8') || m.includes('gemini-3.7') || m.includes('gemini-3.6')) return 'Gemini 3.x';
+  if (m.includes('gemini-2.5')) return 'Gemini 2.5';
+  if (m.includes('gemini-2.0') || m.includes('gemini-2-flash')) return 'Gemini 2.0 Flash';
+  if (m.includes('gemini-1.5-pro')) return 'Gemini 1.5 Pro';
+  if (m.includes('gemini-1.5-flash')) return 'Gemini 1.5 Flash';
+  if (m.includes('gemini-pro')) return 'Gemini Pro';
+  if (m.includes('deepseek-v3')) return 'DeepSeek V3';
+  if (m.includes('deepseek-v2')) return 'DeepSeek V2';
+  if (m.includes('o1') || m.includes('o3')) return 'OpenAI o1/o3';
+  if (m.includes('qwq')) return 'QWQ';
+  if (m.includes('qwen')) return 'Qwen';
+  if (m.includes('sonar')) return 'Sonar';
+  if (m.includes('codex')) return 'Codex';
+  if (m.includes('claude-code')) return 'Claude Code';
+  return model.split(/[-.]/)[0] || model;
+}
+
+function finalizeModelBuckets(buckets, maxFamilies) {
+  maxFamilies = maxFamilies || 7;
+  return buckets.sort(function(a,b){return b.tokens - a.tokens;}).slice(0, maxFamilies)
+    .map(function(b){ return { family: modelFamilyName(b.model), tokens: b.tokens, requests: b.requests }; });
+}
+
+export async function getUsageDashboard(opts) {
+  opts = opts || {};
+  var minRequests = opts.minRequests !== undefined ? opts.minRequests : 50;
+  var db = await getAdapter();
+  var today = new Date(); today.setHours(0,0,0,0);
+  var notImported = '(meta IS NULL OR meta NOT LIKE \'%\"imported\":true%\' OR meta LIKE \'%\"gatewaySync\":true%\')';
+
+  // Heatmap
+  var dayRows = db.all(
+    'SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? AND dateKey <= ?',
+    [localDayKey(new Date(today.getTime() - 364*86400000)), localDayKey(today)]
+  );
+  var daily = dayRows.map(function(r) {
+    var d = parseJson(r.data, {});
+    return { date: r.dateKey, requests: d.requests||0, tokens: (d.promptTokens||0)+(d.completionTokens||0), cost: d.cost||0 };
+  }).sort(function(a,b){ return a.date.localeCompare(b.date); });
+
+  // Lifetime stats
+  var lifetime = { totalRequests:0, totalTokens:0, peakTokens:0, peakDate:null, longestSessionMin:0, currentStreak:0, longestStreak:0, topModel:null, cacheHitRate:null, cacheTokens:0, cacheRequests:0 };
+  (function(){
+    var allDays = db.all('SELECT dateKey, data FROM usageDaily ORDER BY dateKey');
+    var streak = 0, prevKey = null;
+    var activeSet = {};
+    for (var i=0; i<allDays.length; i++) {
+      var r = allDays[i];
+      var d = parseJson(r.data, {});
+      var tokens = (d.promptTokens||0)+(d.completionTokens||0);
+      var active = (d.requests||0) > 0;
+      lifetime.totalRequests += d.requests||0;
+      lifetime.totalTokens += tokens;
+      if (tokens > lifetime.peakTokens) { lifetime.peakTokens = tokens; lifetime.peakDate = r.dateKey; }
+      if (active) {
+        activeSet[r.dateKey] = true;
+        var prev = prevKey ? new Date(prevKey+'T00:00:00') : null;
+        var cur = new Date(r.dateKey+'T00:00:00');
+        streak = prev && (cur-prev)===86400000 ? streak+1 : 1;
+        lifetime.longestStreak = Math.max(lifetime.longestStreak, streak);
+      } else { streak = 0; }
+      prevKey = r.dateKey;
+    }
+    var cursorDay = new Date(today);
+    if (!activeSet[localDayKey(cursorDay)]) cursorDay.setDate(cursorDay.getDate()-1);
+    while (activeSet[localDayKey(cursorDay)]) { lifetime.currentStreak++; cursorDay.setDate(cursorDay.getDate()-1); }
+
+    var SESSION_GAP = 30*60000;
+    var tsRows = db.all('SELECT timestamp FROM usageHistory ORDER BY timestamp');
+    var sessionStart = null, prevTs = null;
+    for (var j=0; j<tsRows.length; j++) {
+      var t = new Date(tsRows[j].timestamp).getTime();
+      if (isNaN(t)) continue;
+      if (prevTs !== null && t-prevTs <= SESSION_GAP) {
+        lifetime.longestSessionMin = Math.max(lifetime.longestSessionMin, Math.round((t-sessionStart)/60000));
+      } else { sessionStart = t; }
+      prevTs = t;
+    }
+
+    var topRows = db.all(
+      'SELECT provider, model, promptTokens, completionTokens FROM usageHistory WHERE timestamp >= ? AND timestamp < ?',
+      [new Date(today.getTime()-6*86400000).toISOString(), new Date(today.getTime()+86400000).toISOString()]
+    );
+    var modelTokens = {};
+    for (var k=0; k<topRows.length; k++) {
+      var rr = topRows[k];
+      var mk = (rr.model||'unknown')+'|'+(rr.provider||'');
+      modelTokens[mk] = (modelTokens[mk]||0)+(rr.promptTokens||0)+(rr.completionTokens||0);
+    }
+    var top = Object.entries(modelTokens).sort(function(a,b){return b[1]-a[1];})[0];
+    if (top) {
+      var sep = top[0].lastIndexOf('|');
+      lifetime.topModel = { model: top[0].slice(0,sep), provider: top[0].slice(sep+1)||null, tokens: top[1] };
+    }
+
+    var cacheTokensSum=0, cachePromptSum=0, cacheRequestsCount=0;
+    try {
+      var cacheRows = db.all('SELECT promptTokens, tokens FROM usageHistory WHERE tokens LIKE \'%cache%\'');
+      for (var ci=0; ci<cacheRows.length; ci++) {
+        var cr = cacheRows[ci];
+        var ct = parseJson(cr.tokens, {});
+        var cached = ct.cached_tokens || ct.cache_read_input_tokens || 0;
+        var prompt = cr.promptTokens || ct.prompt_tokens || 0;
+        if (cached<=0 || prompt<=0 || cached>=prompt) continue;
+        cacheTokensSum+=cached; cachePromptSum+=prompt; cacheRequestsCount++;
+      }
+      lifetime.cacheHitRate = cachePromptSum>0 ? round1((cacheTokensSum/cachePromptSum)*100) : null;
+      lifetime.cacheTokens = cacheTokensSum; lifetime.cacheRequests = cacheRequestsCount;
+    } catch(e) {}
+  })();
+
+  var groupStats = 'COUNT(*) as requests, SUM(CASE WHEN status != \'ok\' THEN 1 ELSE 0 END) as errors, SUM(promptTokens) as promptTokens, SUM(completionTokens) as completionTokens, SUM(cost) as cost, MAX(timestamp) as lastUsed';
+  var rangeFilter = 'AND timestamp >= ? AND timestamp < ?';
+  var nodeTsGte = new Date(today.getTime()-6*86400000).toISOString();
+  var nodeTsLt = new Date(today.getTime()+86400000).toISOString();
+
+  var nodeRows = db.all(
+    'SELECT provider, ' + groupStats + ' FROM usageHistory WHERE ' + notImported + ' ' + rangeFilter + ' GROUP BY COALESCE(provider, \'\')',
+    [nodeTsGte, nodeTsLt]
+  );
+  var modelRows = db.all(
+    'SELECT provider, model, ' + groupStats + ' FROM usageHistory WHERE ' + notImported + ' ' + rangeFilter + ' GROUP BY COALESCE(provider, \'\'), COALESCE(model, \'\')',
+    [nodeTsGte, nodeTsLt]
+  );
+
+  var perfAgg = { node: {}, model: {} };
   try {
-    const db = await getAdapter();
-    const rows = db.all(
-      `SELECT timestamp, provider, model, connectionId, promptTokens, completionTokens, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`,
-      [limit],
+    var rdRows = db.all('SELECT provider, model, data FROM requestDetails');
+    for (var ri=0; ri<rdRows.length; ri++) {
+      var rd = rdRows[ri];
+      var d = parseJson(rd.data, {}) || {};
+      var total = (d && d.latency && typeof d.latency.total === 'number' && d.latency.total > 0) ? d.latency.total : null;
+      if (total === null) continue;
+      var ttft = (d && d.latency && typeof d.latency.ttft === 'number' && d.latency.ttft > 0) ? d.latency.ttft : null;
+      var outTokens = (d.tokens && (d.tokens.completion_tokens || d.tokens.output_tokens)) || 0;
+      var durationMs = null;
+      if (outTokens > 0) {
+        if (ttft !== null && total > ttft && total-ttft >= 50) durationMs = total - ttft;
+        else if (total >= 50) durationMs = total;
+        if (durationMs !== null && durationMs > 0 && outTokens/(durationMs/1000) > 300 && total >= 50) durationMs = total;
+      }
+      var nodeKey = rd.provider || '';
+      var modelKey = (rd.provider||'') + '|' + (rd.model||'');
+      for (var si=0; si<2; si++) {
+        var scope = si===0 ? 'node' : 'model';
+        var key = si===0 ? nodeKey : modelKey;
+        if (!perfAgg[scope][key]) perfAgg[scope][key] = { sum:0, count:0, ttftSum:0, ttftCount:0, tokensSum:0, durMsSum:0 };
+        var agg = perfAgg[scope][key];
+        agg.sum += total; agg.count += 1;
+        if (ttft !== null) { agg.ttftSum += ttft; agg.ttftCount += 1; }
+        if (durationMs !== null && durationMs > 0 && outTokens > 0) { agg.tokensSum += outTokens; agg.durMsSum += durationMs; }
+      }
+    }
+  } catch(e) {}
+  try {
+    var metaRows = db.all(
+      'SELECT provider, model, meta, completionTokens FROM usageHistory WHERE ' + notImported + ' ' + rangeFilter + ' AND meta LIKE \'%latencyMs%\'',
+      [nodeTsGte, nodeTsLt]
+    );
+    for (var mi=0; mi<metaRows.length; mi++) {
+      var mr = metaRows[mi];
+      var mm = parseJson(mr.meta, {}) || {};
+      var mtotal = typeof mm.latencyMs === 'number' && mm.latencyMs > 0 ? mm.latencyMs : null;
+      if (mtotal === null) continue;
+      var mttft = typeof mm.ttftMs === 'number' && mm.ttftMs > 0 ? mm.ttftMs : null;
+      var moutTokens = mr.completionTokens || 0;
+      var mdurationMs = null;
+      if (moutTokens > 0) {
+        if (mttft !== null && mtotal > mttft && mtotal-mttft >= 50) mdurationMs = mtotal - mttft;
+        else if (mtotal >= 50) mdurationMs = mtotal;
+        if (mdurationMs !== null && mdurationMs > 0 && moutTokens/(mdurationMs/1000) > 300 && mtotal >= 50) mdurationMs = mtotal;
+      }
+      var mNodeKey = mr.provider || '';
+      var mModelKey = (mr.provider||'') + '|' + (mr.model||'');
+      for (var ms=0; ms<2; ms++) {
+        var mScope = ms===0 ? 'node' : 'model';
+        var mKey = ms===0 ? mNodeKey : mModelKey;
+        if (!perfAgg[mScope][mKey]) perfAgg[mScope][mKey] = { sum:0, count:0, ttftSum:0, ttftCount:0, tokensSum:0, durMsSum:0 };
+        var magg = perfAgg[mScope][mKey];
+        magg.sum += mtotal; magg.count += 1;
+        if (mttft !== null) { magg.ttftSum += mttft; magg.ttftCount += 1; }
+        if (mdurationMs !== null && mdurationMs > 0 && moutTokens > 0) { magg.tokensSum += moutTokens; magg.durMsSum += mdurationMs; }
+      }
+    }
+  } catch(e) {}
+
+  function perfOf(scope, key) {
+    var agg = perfAgg[scope] && perfAgg[scope][key];
+    if (!agg) return { avgLatencyMs: null, avgTtftMs: null, avgSpeed: null };
+    return {
+      avgLatencyMs: Math.round(agg.sum/agg.count),
+      avgTtftMs: agg.ttftCount > 0 ? Math.round(agg.ttftSum/agg.ttftCount) : null,
+      avgSpeed: (agg.durMsSum > 0 && agg.tokensSum > 0) ? round1(agg.tokensSum/(agg.durMsSum/1000)) : null,
+    };
+  }
+
+  function toEntry(row, scope, key, extra) {
+    var requests = row.requests||0, errors = row.errors||0;
+    var successRate = requests > 0 ? round1(((requests-errors)/requests)*100) : 0;
+    var p = perfOf(scope, key);
+    var score = p.avgLatencyMs == null ? null : computeScore(successRate, latencyScoreFromMs(p.avgLatencyMs), speedScoreFromTps(p.avgSpeed));
+    return Object.assign({}, extra, {
+      requests: requests, errors: errors, successRate: successRate,
+      avgLatencyMs: p.avgLatencyMs, avgTtftMs: p.avgTtftMs, avgSpeed: p.avgSpeed,
+      hasPerfData: p.avgLatencyMs != null, hasTtft: p.avgTtftMs != null, hasSpeed: p.avgSpeed != null,
+      score: score, promptTokens: row.promptTokens||0, completionTokens: row.completionTokens||0,
+      cost: row.cost||0, lastUsed: row.lastUsed||null
+    });
+  }
+
+  var nodes = nodeRows
+    .filter(function(r){ return (r.requests||0) >= minRequests; })
+    .map(function(r){ return toEntry(r, 'node', r.provider||'', { provider: r.provider||'unknown', name: r.provider||'unknown' }); })
+    .sort(function(a,b){ return (b.score||0)-(a.score||0); });
+
+  var modelMin = Math.min(minRequests, 10);
+  var models = modelRows
+    .filter(function(r){ return (r.requests||0) >= modelMin; })
+    .map(function(r){ return toEntry(r, 'model', (r.provider||'')+'|'+r.model||'', { model: r.model||'unknown', provider: r.provider||'unknown' }); })
+    .sort(function(a,b){ return (b.score||0)-(a.score||0); });
+
+  return { daily: daily, nodes: nodes, models: models, lifetime: lifetime };
+}
+
+export async function importUsageRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return { imported: 0, skipped: 0 };
+  var db = await getAdapter();
+  var imported = 0, skipped = 0;
+  db.transaction(function() {
+    for (var i=0; i<rows.length; i++) {
+      var entry = rows[i];
+      var tokens = entry.tokens || {};
+      var promptTokens = tokens.prompt_tokens || tokens.input_tokens || entry.promptTokens || 0;
+      var completionTokens = tokens.completion_tokens || tokens.output_tokens || entry.completionTokens || 0;
+      var ts = entry.timestamp || new Date().toISOString();
+      var existing = db.get(
+        'SELECT id, meta FROM usageHistory WHERE timestamp=? AND COALESCE(provider,\'\')=COALESCE(?,\'\') AND COALESCE(model,\'\')=COALESCE(?,\'\') AND COALESCE(connectionId,\'\')=COALESCE(?,\'\') AND COALESCE(apiKey,\'\')=COALESCE(?,\'\') AND promptTokens=? AND completionTokens=? ORDER BY id DESC LIMIT 1',
+        [ts, entry.provider||null, entry.model||null, entry.connectionId||null, entry.apiKey||null, promptTokens, completionTokens]
+      );
+      if (existing) {
+        var em = parseJson(existing.meta, {}) || {};
+        if (em.imported !== true) db.run('UPDATE usageHistory SET meta=? WHERE id=?', [stringifyJson({imported:true, ...em}), existing.id]);
+        skipped++; continue;
+      }
+      db.run(
+        'INSERT INTO usageHistory(timestamp,provider,model,connectionId,apiKey,endpoint,promptTokens,completionTokens,cost,status,tokens,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+        [ts, entry.provider||null, entry.model||null, entry.connectionId||null, entry.apiKey||null, entry.endpoint||null,
+         promptTokens, completionTokens, entry.cost||0, entry.status||'ok', stringifyJson(tokens), stringifyJson({imported:true, ...(entry.meta||{})})]
+      );
+      var dateKey = getLocalDateKey(ts);
+      var drow = db.get('SELECT data FROM usageDaily WHERE dateKey=?', [dateKey]);
+      var day = drow ? parseJson(drow.data, {}) : {requests:0,promptTokens:0,completionTokens:0,cost:0,byProvider:{},byModel:{},byAccount:{},byApiKey:{},byEndpoint:{}};
+      aggregateEntryToDay(day, entry);
+      db.run('INSERT INTO usageDaily(dateKey,data) VALUES(?,?) ON CONFLICT(dateKey) DO UPDATE SET data=excluded.data', [dateKey, stringifyJson(day)]);
+      var cur = db.get('SELECT value FROM _meta WHERE key=?', ['totalRequestsLifetime']);
+      var next = (cur ? parseInt(cur.value,10) : 0) + 1;
+      db.run('INSERT INTO _meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ['totalRequestsLifetime', String(next)]);
+      imported++;
+    }
+  });
+  if (imported > 0) scheduleStatsEvent('update', 250);
+  return { imported: imported, skipped: skipped };
+}
+
+// ── 原有函数（保留）────────────────────────────────────────────────
+
+export async function getRecentLogs(limit) {
+  limit = limit !== undefined ? limit : 200;
+  try {
+    var db = await getAdapter();
+    var rows = db.all(
+      'SELECT timestamp,provider,model,connectionId,promptTokens,completionTokens,status,tokens FROM usageHistory ORDER BY id DESC LIMIT ?',
+      [limit]
     );
     if (!rows.length) return [];
-
-    const connMap = {};
+    var connMap = {};
     try {
-      const { getProviderConnections } = await import("./connectionsRepo.js");
-      const connections = await getProviderConnections();
-      for (const c of connections) connMap[c.id] = c.name || c.email || "";
-    } catch {}
-
-    return rows.map((r) => {
-      const ts = formatLogDate(new Date(r.timestamp));
-      const p = r.provider?.toUpperCase() || "-";
-      const m = r.model || "-";
-      const account = connMap[r.connectionId] || (r.connectionId ? r.connectionId.slice(0, 8) : "-");
-      const tk = r.tokens ? parseJson(r.tokens, {}) : {};
-      const sent = r.promptTokens ?? tk.prompt_tokens ?? "-";
-      const received = r.completionTokens ?? tk.completion_tokens ?? "-";
-      return `${ts} | ${m} | ${p} | ${account} | ${sent} | ${received} | ${r.status || "-"}`;
+      var mod = await import('./connectionsRepo.js');
+      var connections = await mod.getProviderConnections();
+      for (var i=0; i<connections.length; i++) {
+        var c = connections[i];
+        connMap[c.id] = c.name || c.email || '';
+      }
+    } catch(e) {}
+    return rows.map(function(r) {
+      var ts = formatLogDate(new Date(r.timestamp));
+      var p = (r.provider||'').toUpperCase() || '-';
+      var m = r.model || '-';
+      var account = connMap[r.connectionId] || (r.connectionId ? r.connectionId.slice(0,8) : '-');
+      var tk = r.tokens ? parseJson(r.tokens, {}) : {};
+      var sent = r.promptTokens !== undefined ? r.promptTokens : (tk.prompt_tokens !== undefined ? tk.prompt_tokens : '-');
+      var received = r.completionTokens !== undefined ? r.completionTokens : (tk.completion_tokens !== undefined ? tk.completion_tokens : '-');
+      return ts + ' | ' + m + ' | ' + p + ' | ' + account + ' | ' + sent + ' | ' + received + ' | ' + (r.status||'-');
     });
-  } catch (e) {
-    console.error("[usageRepo] getRecentLogs failed:", e.message);
+  } catch(e) {
+    console.error('[usageRepo] getRecentLogs failed:', e.message);
     return [];
   }
 }
+
