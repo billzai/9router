@@ -387,7 +387,7 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
               remainingPercentage: quota.remainingPercentage,
             });
-          });
+          }
         }
         break;
 
@@ -428,6 +428,7 @@ export function parseQuotaData(provider, data) {
         break;
 
       case "qoder":
+      case "qoder-cn":
         // Qoder ships a `user` quota and (optionally) an `organization`
         // quota, both with same shape: {total, used, remaining, unit, resetAt}.
         // Skip an organization bucket when its total is 0 — most personal
@@ -577,7 +578,7 @@ export function parseQuotaData(provider, data) {
         break;
 
       case "ollama":
-        // Session (5h) / Weekly (7d) usage % from ollama.com/api/usage.
+        // Session (5h) / Weekly (7d) / Monthly usage % from ollama.com/api/usage.
         // remainingPercentage only — no absolute remaining (UI treats remaining as %).
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
@@ -647,10 +648,10 @@ export function parseQuotaData(provider, data) {
       // Use modelKey for antigravity (mapped to family anchor), otherwise use name
       let keyA = a.modelKey || a.name;
       let keyB = b.modelKey || b.name;
-      if (keyA === "gemini") keyA = "gemini-3.8-flash-high";
-      if (keyA === "claude") keyA = "claude-sonnet-4-6";
-      if (keyB === "gemini") keyB = "gemini-3.8-flash-high";
-      if (keyB === "claude") keyB = "claude-sonnet-4-6";
+      if (keyA === "gemini" || keyA === "gemini_session") keyA = "gemini-3.8-flash-high";
+      if (keyA === "claude" || keyA === "claude_gpt_session") keyA = "claude-sonnet-4-6";
+      if (keyB === "gemini" || keyB === "gemini_session") keyB = "gemini-3.8-flash-high";
+      if (keyB === "claude" || keyB === "claude_gpt_session") keyB = "claude-sonnet-4-6";
       const orderA = orderMap.get(keyA) ?? 999;
       const orderB = orderMap.get(keyB) ?? 999;
       return orderA - orderB;

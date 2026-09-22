@@ -18,13 +18,13 @@ const DEFAULT_FALLBACK_MODEL = "ag/gemini-3.7-flash-high";
 // accept the legacy array form [{model, enabled}] (treated as enabled, fallback).
 function normalizeCapEntry(entry) {
   if (Array.isArray(entry)) {
-    return { enabled: true, roundRobin: false, models: entry.map((e) => e?.model || e).filter(Boolean) };
+    return { enabled: true, roundRobin: false, models: entry.map((e) => upgradeLegacyModel(e?.model || e)).filter(Boolean) };
   }
   if (entry && typeof entry === "object") {
     return {
       enabled: entry.enabled !== false,
       roundRobin: !!entry.roundRobin,
-      models: Array.isArray(entry.models) ? entry.models.filter(Boolean) : [],
+      models: Array.isArray(entry.models) ? entry.models.map(upgradeLegacyModel).filter(Boolean) : [],
     };
   }
   return { enabled: false, roundRobin: false, models: [] };
