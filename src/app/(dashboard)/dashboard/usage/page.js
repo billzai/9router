@@ -1,9 +1,12 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { UsageStats, RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import RequestDetailsTab from "./components/RequestDetailsTab";
+
+// Lazy-load the new dashboard v2 components (keep them out of the shared bundle)
+const UsageDashboard = lazy(() => import("./components/UsageDashboard"));
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -11,6 +14,13 @@ const PERIODS = [
   { value: "7d", label: "7D" },
   { value: "30d", label: "30D" },
   { value: "60d", label: "60D" },
+];
+
+const TABS = [
+  { value: "dashboard", label: "Dashboard" },
+  { value: "overview", label: "Overview" },
+  { value: "logs", label: "Logs" },
+  { value: "details", label: "Details" },
 ];
 
 export default function UsagePage() {
@@ -28,9 +38,9 @@ function UsageContent() {
   const [period, setPeriod] = useState("today");
 
   const tabFromUrl = searchParams.get("tab");
-  const activeTab = tabFromUrl && ["overview", "logs", "details"].includes(tabFromUrl)
+  const activeTab = tabFromUrl && TABS.map((t) => t.value).includes(tabFromUrl)
     ? tabFromUrl
-    : "overview";
+    : "dashboard";
 
   const handleTabChange = (value) => {
     if (value === activeTab) return;
@@ -63,6 +73,11 @@ function UsageContent() {
         )}
       </div>
 
+      {activeTab === "dashboard" && (
+        <Suspense fallback={<CardSkeleton />}>
+          <UsageDashboard />
+        </Suspense>
+      )}
       {activeTab === "overview" && (
         <Suspense fallback={<CardSkeleton />}>
           <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
