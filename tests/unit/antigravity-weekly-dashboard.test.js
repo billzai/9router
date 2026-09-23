@@ -19,14 +19,14 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
         remainingPercentage: 90,
       },
       gemini_weekly: {
-        displayName: "Gemini (Weekly)",
+        displayName: "Gemini (7d)",
         used: 250,
         total: 1000,
         resetAt: "2026-09-15T00:00:00Z",
         remainingPercentage: 75,
       },
       claude_gpt_weekly: {
-        displayName: "Claude & GPT (Weekly)",
+        displayName: "Claude & GPT (7d)",
         used: 500,
         total: 1000,
         resetAt: "2026-09-14T00:00:00Z",
@@ -41,8 +41,8 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
 
     expect(names).toContain("Gemini (Flash / Pro)");
     expect(names).toContain("Claude (Sonnet / Opus)");
-    expect(names).toContain("Gemini (Weekly)");
-    expect(names).toContain("Claude & GPT (Weekly)");
+    expect(names).toContain("Gemini (7d)");
+    expect(names).toContain("Claude & GPT (7d)");
   });
 
   it("uses stable modelKey for weekly rows", () => {
@@ -93,7 +93,7 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
           remainingPercentage: 90,
         },
         gemini_weekly: {
-          displayName: "Gemini (Weekly)",
+          displayName: "Gemini (7d)",
           used: 250,
           total: 1000,
           resetAt: "2026-09-15T00:00:00Z",
@@ -107,7 +107,7 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
           remainingPercentage: 95,
         },
         claude_gpt_weekly: {
-          displayName: "Claude & GPT (Weekly)",
+          displayName: "Claude & GPT (7d)",
           used: 500,
           total: 1000,
           resetAt: "2026-09-14T00:00:00Z",
@@ -136,14 +136,14 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
         "gpt-oss-120b-medium": { used: 1000, total: 1000, remainingPercentage: 0, resetAt: "2026-09-20T19:00:21Z", displayName: "GPT-OSS 120B (Medium)" },
         "gemini-3.1-flash-image": { used: 1000, total: 1000, remainingPercentage: 0, resetAt: "2026-09-23T06:00:17Z", displayName: "Gemini 3.1 Flash Image" },
         gemini_weekly: {
-          displayName: "Gemini (Weekly)",
+          displayName: "Gemini (7d)",
           used: 1000,
           total: 1000,
           resetAt: "2026-09-23T06:00:17Z",
           remainingPercentage: 0,
         },
         claude_gpt_weekly: {
-          displayName: "Claude & GPT (Weekly)",
+          displayName: "Claude & GPT (7d)",
           used: 807,
           total: 1000,
           resetAt: "2026-09-24T18:09:46Z",
@@ -164,12 +164,12 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
 
     // Should contain unique usages:
     expect(names).toContain("Claude & GPT (5h)");
-    expect(names).toContain("Claude & GPT (Weekly)");
-    expect(names).toContain("Gemini (Weekly)");
+    expect(names).toContain("Claude & GPT (7d)");
+    expect(names).toContain("Gemini (7d)");
     expect(names).toContain("Gemini 3.1 Flash Image");
 
     // Should NOT contain redundant duplicate entries:
-    expect(names).not.toContain("Gemini (Flash / Pro)"); // duplicate of Gemini (Weekly)
+    expect(names).not.toContain("Gemini (Flash / Pro)"); // duplicate of Gemini (7d)
     expect(names).not.toContain("Claude (Sonnet / Opus)"); // duplicate of Claude & GPT (5h)
     expect(names).not.toContain("GPT-OSS 120B (Medium)"); // covered by Claude & GPT family
     expect(quotas).toHaveLength(4);

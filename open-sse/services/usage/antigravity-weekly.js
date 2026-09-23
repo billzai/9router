@@ -29,12 +29,12 @@ export function _clearWeeklyCache() {
 const GROUP_CONFIGS = [
   {
     pattern: /gemini/i,
-    weekly: { key: "gemini_weekly", displayName: "Gemini (Weekly)" },
+    weekly: { key: "gemini_weekly", displayName: "Gemini (7d)" },
     session: { key: "gemini_session", displayName: "Gemini (5h)" },
   },
   {
     pattern: /claude|gpt/i,
-    weekly: { key: "claude_gpt_weekly", displayName: "Claude & GPT (Weekly)" },
+    weekly: { key: "claude_gpt_weekly", displayName: "Claude & GPT (7d)" },
     session: { key: "claude_gpt_session", displayName: "Claude & GPT (5h)" },
   },
 ];

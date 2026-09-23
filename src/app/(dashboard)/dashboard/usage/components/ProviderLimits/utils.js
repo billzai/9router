@@ -391,7 +391,7 @@ export function parseQuotaData(provider, data) {
           const hasClaudeWeekly = Boolean(data.quotas.claude_gpt_weekly);
           const hasClaudeSession = Boolean(data.quotas.claude_gpt_session);
 
-          // Official Antigravity order per family: Weekly first, then 5h (session)
+          // Antigravity family groups: Gemini (7d+5h), Claude & GPT (7d+5h)
           // 1. Gemini Family
           if (hasGeminiWeekly) {
             summaryModels.filter(([k]) => k === "gemini_weekly").forEach(([modelKey, quota]) => {

@@ -59,7 +59,7 @@ describe("parseWeeklyQuotaSummary", () => {
       used: 250,
       total: 1000,
       remainingPercentage: 75,
-      displayName: "Gemini (Weekly)",
+      displayName: "Gemini (7d)",
       unlimited: false,
     });
     expect(result.gemini_weekly.resetAt).toBe("2026-09-15T00:00:00.000Z");
@@ -79,7 +79,7 @@ describe("parseWeeklyQuotaSummary", () => {
       used: 500,
       total: 1000,
       remainingPercentage: 50,
-      displayName: "Claude & GPT (Weekly)",
+      displayName: "Claude & GPT (7d)",
       unlimited: false,
     });
     expect(result.claude_gpt_weekly.resetAt).toBe("2026-09-14T00:00:00.000Z");
