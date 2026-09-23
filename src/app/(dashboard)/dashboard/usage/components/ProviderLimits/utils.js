@@ -391,7 +391,20 @@ export function parseQuotaData(provider, data) {
           const hasClaudeWeekly = Boolean(data.quotas.claude_gpt_weekly);
           const hasClaudeSession = Boolean(data.quotas.claude_gpt_session);
 
-          // 1. Gemini Family:
+          // Official Antigravity order per family: Weekly first, then 5h (session)
+          // 1. Gemini Family
+          if (hasGeminiWeekly) {
+            summaryModels.filter(([k]) => k === "gemini_weekly").forEach(([modelKey, quota]) => {
+              normalizedQuotas.push({
+                name: quota.displayName || modelKey,
+                modelKey,
+                used: quota.used || 0,
+                total: quota.total || 0,
+                resetAt: quota.resetAt || null,
+                remainingPercentage: quota.remainingPercentage,
+              });
+            });
+          }
           if (hasGeminiSession) {
             summaryModels.filter(([k]) => k === "gemini_session").forEach(([modelKey, quota]) => {
               normalizedQuotas.push({
@@ -423,9 +436,9 @@ export function parseQuotaData(provider, data) {
             }
           }
 
-          // Show Gemini weekly row if present
-          if (hasGeminiWeekly) {
-            summaryModels.filter(([k]) => k === "gemini_weekly").forEach(([modelKey, quota]) => {
+          // 2. Claude & GPT Family
+          if (hasClaudeWeekly) {
+            summaryModels.filter(([k]) => k === "claude_gpt_weekly").forEach(([modelKey, quota]) => {
               normalizedQuotas.push({
                 name: quota.displayName || modelKey,
                 modelKey,
@@ -436,8 +449,6 @@ export function parseQuotaData(provider, data) {
               });
             });
           }
-
-          // 2. Claude & GPT Family:
           if (hasClaudeSession) {
             summaryModels.filter(([k]) => k === "claude_gpt_session").forEach(([modelKey, quota]) => {
               normalizedQuotas.push({
@@ -466,20 +477,6 @@ export function parseQuotaData(provider, data) {
                 remainingPercentage: rep.remainingPercentage,
               });
             }
-          }
-
-          // Show Claude & GPT weekly row if present
-          if (hasClaudeWeekly) {
-            summaryModels.filter(([k]) => k === "claude_gpt_weekly").forEach(([modelKey, quota]) => {
-              normalizedQuotas.push({
-                name: quota.displayName || modelKey,
-                modelKey,
-                used: quota.used || 0,
-                total: quota.total || 0,
-                resetAt: quota.resetAt || null,
-                remainingPercentage: quota.remainingPercentage,
-              });
-            });
           }
 
           // 3. Standalone Image Generation Models (unique usage)

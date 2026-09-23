@@ -5,7 +5,7 @@
 import { CLIENT_METADATA } from "../../config/appConstants.js";
 import { ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_IDE_VERSION, ANTIGRAVITY_OAUTH_CLIENT } from "../../providers/shared.js";
 import { U, parseResetTime, normalizeCloudCodeProjectId, fetchWithTimeout } from "./shared.js";
-import { fetchAntigravityWeeklyQuota } from "./antigravity-weekly.js";
+import { parseWeeklyQuotaSummary } from "./antigravity-weekly.js";
 
 // Antigravity API config (from Quotio) — urls from registry, oauth client + dynamic UA kept here
 const ANTIGRAVITY_CONFIG = {
@@ -155,37 +155,10 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
     }
 
     const data = await response.json();
-    const quotas = {};
+    let quotas = parseWeeklyQuotaSummary(data);
 
-    // Parse groups → buckets structure (identical to official CLI)
-    if (Array.isArray(data.groups)) {
-      for (const group of data.groups) {
-        if (!Array.isArray(group.buckets)) continue;
-
-        for (const bucket of group.buckets) {
-          const frac = bucket.remainingFraction;
-          if (frac == null) continue;
-
-          const pct = frac * 100;
-          const used = Math.round(1000 * (1 - frac));
-          const windowKey = bucket.window === "5h" ? "5h" : "7d";
-
-          const cleanGroup = String(group.displayName || "")
-            .replace(/\s+models?/i, "")
-            .replace(/Claude and GPT/i, "Claude & GPT")
-            .trim();
-
-          quotas[bucket.bucketId] = {
-            used,
-            total: 1000,
-            resetAt: parseResetTime(bucket.resetTime),
-            remainingPercentage: pct,
-            unlimited: false,
-            displayName: `${cleanGroup} (${windowKey})`,
-          };
-        }
-      }
-    } else if (data.models) {
+    if ((!quotas || Object.keys(quotas).length === 0) && data.models) {
+      quotas = {};
       const importantModels = [
         'gemini-3.8-flash-high',
         'gemini-3.8-flash-medium',
