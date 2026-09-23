@@ -759,19 +759,36 @@ export function parseQuotaData(provider, data) {
     return normalizedQuotas;
   }
 
+  // Antigravity: keep family groups together — Gemini (7d,5h) then Claude and GPT (7d,5h)
+  // Do NOT map only *_session into PROVIDER_MODELS order (that pushes weekly rows to the end).
+  if (provider?.toLowerCase() === "antigravity") {
+    const AG_FAMILY_ORDER = {
+      gemini_weekly: 0,
+      gemini_session: 1,
+      gemini: 1,
+      claude_gpt_weekly: 2,
+      claude_gpt_session: 3,
+      claude: 3,
+    };
+    normalizedQuotas.sort((a, b) => {
+      const keyA = a.modelKey || a.name || "";
+      const keyB = b.modelKey || b.name || "";
+      const orderA = AG_FAMILY_ORDER[keyA] ?? 50;
+      const orderB = AG_FAMILY_ORDER[keyB] ?? 50;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+    return normalizedQuotas;
+  }
+
   // Sort quotas according to PROVIDER_MODELS order
   const modelOrder = getModelsByProviderId(provider);
   if (modelOrder.length > 0) {
     const orderMap = new Map(modelOrder.map((m, i) => [m.id, i]));
-    
+
     normalizedQuotas.sort((a, b) => {
-      // Use modelKey for antigravity (mapped to family anchor), otherwise use name
-      let keyA = a.modelKey || a.name;
-      let keyB = b.modelKey || b.name;
-      if (keyA === "gemini" || keyA === "gemini_session") keyA = "gemini-3.8-flash-high";
-      if (keyA === "claude" || keyA === "claude_gpt_session") keyA = "claude-sonnet-4-6";
-      if (keyB === "gemini" || keyB === "gemini_session") keyB = "gemini-3.8-flash-high";
-      if (keyB === "claude" || keyB === "claude_gpt_session") keyB = "claude-sonnet-4-6";
+      const keyA = a.modelKey || a.name;
+      const keyB = b.modelKey || b.name;
       const orderA = orderMap.get(keyA) ?? 999;
       const orderB = orderMap.get(keyB) ?? 999;
       return orderA - orderB;

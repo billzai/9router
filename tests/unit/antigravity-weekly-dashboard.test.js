@@ -78,11 +78,11 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
       q.modelKey === "gemini_weekly" || q.modelKey === "claude_gpt_weekly"
     );
     expect(weeklyRows).toHaveLength(2);
-    expect(weeklyRows[0].name).toMatch(/Weekly/);
-    expect(weeklyRows[1].name).toMatch(/Weekly/);
+    expect(weeklyRows[0].name).toMatch(/7d/);
+    expect(weeklyRows[1].name).toMatch(/7d/);
   });
 
-  it("order: session, weekly, then other models", () => {
+  it("order: Gemini family (7d then 5h), then Claude and GPT family (7d then 5h)", () => {
     const dataWithBoth = {
       quotas: {
         gemini_session: {
@@ -123,8 +123,17 @@ describe("Antigravity dashboard normalization with weekly quotas", () => {
     const claudeSessionIdx = keys.indexOf("claude_gpt_session");
     const claudeWeeklyIdx = keys.indexOf("claude_gpt_weekly");
 
-    expect(geminiSessionIdx).toBeLessThan(geminiWeeklyIdx);
-    expect(claudeSessionIdx).toBeLessThan(claudeWeeklyIdx);
+    // Family groups: Gemini (7d,5h) then Claude&GPT (7d,5h)
+    expect(geminiWeeklyIdx).toBe(0);
+    expect(geminiSessionIdx).toBe(1);
+    expect(claudeWeeklyIdx).toBe(2);
+    expect(claudeSessionIdx).toBe(3);
+    expect(keys).toEqual([
+      "gemini_weekly",
+      "gemini_session",
+      "claude_gpt_weekly",
+      "claude_gpt_session",
+    ]);
   });
 
   it("excludes redundant duplicates when individual models mirror weekly reset and summary is present", () => {
