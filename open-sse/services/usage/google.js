@@ -5,7 +5,7 @@
 import { CLIENT_METADATA } from "../../config/appConstants.js";
 import { ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_IDE_VERSION, ANTIGRAVITY_OAUTH_CLIENT } from "../../providers/shared.js";
 import { U, parseResetTime, normalizeCloudCodeProjectId, fetchWithTimeout } from "./shared.js";
-import { parseWeeklyQuotaSummary } from "./antigravity-weekly.js";
+import { fetchAntigravityWeeklyQuota } from "./antigravity-weekly.js";
 
 // Antigravity API config (from Quotio) — urls from registry, oauth client + dynamic UA kept here
 const ANTIGRAVITY_CONFIG = {
@@ -115,25 +115,28 @@ async function getGeminiSubscriptionInfo(accessToken, proxyOptions = null) {
 }
 
 /**
- * Antigravity Usage - Fetch quota from retrieveUserQuotaSummary endpoint
- * Returns per-group buckets with both Weekly and Five-Hour limits,
- * matching the official Antigravity CLI display.
+ * Antigravity Usage - Fetch quota from Google Cloud Code API
  */
 export async function getAntigravityUsage(accessToken, providerSpecificData, proxyOptions = null) {
   try {
-    // Use retrieveUserQuotaSummary — the same endpoint the official CLI uses
-    const QUOTA_SUMMARY_URL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+    // Fetch subscription info once — reuse for both projectId and plan
+    const subscriptionInfo = await getAntigravitySubscriptionInfo(accessToken, proxyOptions);
+    const projectId = normalizeCloudCodeProjectId(subscriptionInfo?.cloudaicompanionProject)
+      || normalizeCloudCodeProjectId(providerSpecificData?.projectId)
+      || null;
 
-    const response = await fetchWithTimeout(QUOTA_SUMMARY_URL, {
+    const response = await fetchWithTimeout(ANTIGRAVITY_CONFIG.quotaApiUrl, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
         "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+        "Content-Type": "application/json",
         "X-Client-Name": "antigravity",
         "X-Client-Version": ANTIGRAVITY_IDE_VERSION,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        ...(projectId ? { project: projectId } : {}),
+      }),
     }, 10000, proxyOptions);
 
     if (response.status === 403) {
@@ -151,14 +154,22 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
     }
 
     if (!response.ok) {
-      throw new Error(`Antigravity quota API error: ${response.status}`);
+      throw new Error(`Antigravity API error: ${response.status}`);
     }
 
     const data = await response.json();
-    let quotas = parseWeeklyQuotaSummary(data);
+    const quotas = {};
 
-    if ((!quotas || Object.keys(quotas).length === 0) && data.models) {
-      quotas = {};
+    // Detect tier: free-tier accounts only have weekly quotas (no separate 5h window).
+    // On free-tier, fetchAvailableModels returns misleading per-model quota info
+    // (missing remainingFraction defaults to 0, or reflects the weekly limit not a 5h window).
+    const paidTierId = subscriptionInfo?.paidTier?.id;
+    const isFreeTier = !paidTierId || paidTierId === "free-tier";
+
+    // Parse model quotas only for paid-tier accounts.
+    // Free-tier accounts skip this — their only meaningful quota is the weekly limit.
+    if (!isFreeTier && data.models) {
+      // Filter only recommended/important models (must match PROVIDER_MODELS ag ids)
       const importantModels = [
         'gemini-3.8-flash-high',
         'gemini-3.8-flash-medium',
@@ -176,20 +187,30 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
         'claude-sonnet-4-6',
         'claude-opus-4-6-thinking',
         'gpt-oss-120b-medium',
+        // Image generation models
         'gemini-3.1-flash-image',
       ];
 
       for (const [modelKey, info] of Object.entries(data.models)) {
-        if (!info.quotaInfo || info.isInternal || !importantModels.includes(modelKey)) {
+        // Skip models without quota info
+        if (!info.quotaInfo) {
+          continue;
+        }
+
+        // Skip internal models and non-important models
+        if (info.isInternal || !importantModels.includes(modelKey)) {
           continue;
         }
 
         const remainingFraction = info.quotaInfo.remainingFraction || 0;
         const remainingPercentage = remainingFraction * 100;
-        const total = 1000;
+
+        // Convert percentage to used/total for UI compatibility
+        const total = 1000; // Normalized base
         const remaining = Math.round(total * remainingFraction);
         const used = total - remaining;
 
+        // Use modelKey as key (matches PROVIDER_MODELS id)
         quotas[modelKey] = {
           used,
           total,
@@ -201,8 +222,53 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
       }
     }
 
-    // Fetch plan name from subscription info
-    const subscriptionInfo = await getAntigravitySubscriptionInfo(accessToken, proxyOptions);
+    // Best-effort weekly quota overlay — never blocks or breaks per-model results
+    try {
+      const weeklyQuotas = await fetchAntigravityWeeklyQuota(
+        accessToken,
+        projectId,
+        proxyOptions
+      );
+
+      // Reconcile short-window session quota if models are exhausted:
+      // If every model in a family is locked/exhausted (remainingPercentage === 0)
+      // until a future reset time, update the 5h session row (not the weekly row).
+      const entries = Object.entries(quotas);
+      const geminiModels = entries.filter(([k]) => k.startsWith("gemini-") && !k.includes("image"));
+      const claudeModels = entries.filter(([k]) => k.startsWith("claude-"));
+
+      if (weeklyQuotas.gemini_session && geminiModels.length > 0) {
+        const allGeminiExhausted = geminiModels.every(([, q]) => (q.remainingPercentage ?? 0) === 0);
+        if (allGeminiExhausted && weeklyQuotas.gemini_session.remainingPercentage > 0) {
+          const maxResetAt = geminiModels.reduce((max, [, q]) =>
+            !max || (q.resetAt && new Date(q.resetAt) > new Date(max)) ? q.resetAt : max, null
+          );
+          weeklyQuotas.gemini_session.used = weeklyQuotas.gemini_session.total;
+          weeklyQuotas.gemini_session.remainingPercentage = 0;
+          if (maxResetAt) {
+            weeklyQuotas.gemini_session.resetAt = maxResetAt;
+          }
+        }
+      }
+
+      if (weeklyQuotas.claude_gpt_session && claudeModels.length > 0) {
+        const allClaudeExhausted = claudeModels.every(([, q]) => (q.remainingPercentage ?? 0) === 0);
+        if (allClaudeExhausted && weeklyQuotas.claude_gpt_session.remainingPercentage > 0) {
+          const maxResetAt = claudeModels.reduce((max, [, q]) =>
+            !max || (q.resetAt && new Date(q.resetAt) > new Date(max)) ? q.resetAt : max, null
+          );
+          weeklyQuotas.claude_gpt_session.used = weeklyQuotas.claude_gpt_session.total;
+          weeklyQuotas.claude_gpt_session.remainingPercentage = 0;
+          if (maxResetAt) {
+            weeklyQuotas.claude_gpt_session.resetAt = maxResetAt;
+          }
+        }
+      }
+
+      Object.assign(quotas, weeklyQuotas);
+    } catch {
+      // Silently ignore — weekly is best-effort
+    }
 
     return {
       plan: subscriptionInfo?.currentTier?.name || "Unknown",
