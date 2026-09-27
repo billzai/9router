@@ -2,7 +2,8 @@
 
 import { Suspense, lazy, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { UsageStats, RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
+import { RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
+import UsageStats from "@/shared/components/UsageStats";
 import RequestDetailsTab from "./components/RequestDetailsTab";
 
 // Lazy-load the new dashboard v2 components (keep them out of the shared bundle)
