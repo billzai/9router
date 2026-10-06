@@ -14,6 +14,7 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveCodebuddyCnModels } from "open-sse/services/codebuddyCnModels.js";
+import codexProvider from "open-sse/providers/registry/codex.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
