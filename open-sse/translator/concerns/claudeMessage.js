@@ -37,6 +37,15 @@ export function openAICompletionToClaudeMessage(responseBody) {
   if (content.length === 0) content.push({ type: CLAUDE_BLOCK.TEXT, text: "" });
 
   const usage = responseBody.usage || {};
+  const usageObj = {
+    input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
+    output_tokens: usage.completion_tokens || usage.output_tokens || 0,
+  };
+  const cached = usage.cached_tokens || usage.prompt_tokens_details?.cached_tokens || usage.cache_read_input_tokens || 0;
+  if (cached > 0) usageObj.cache_read_input_tokens = cached;
+  const cacheCreate = usage.cache_creation_input_tokens || 0;
+  if (cacheCreate > 0) usageObj.cache_creation_input_tokens = cacheCreate;
+
   return {
     id: String(responseBody.id || `msg_${Date.now()}`).replace(/^chatcmpl-/, ""),
     type: RESPONSES_ITEM.MESSAGE,
@@ -45,9 +54,6 @@ export function openAICompletionToClaudeMessage(responseBody) {
     content,
     stop_reason: fromOpenAIFinish(choice.finish_reason, FORMATS.CLAUDE),
     stop_sequence: null,
-    usage: {
-      input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
-      output_tokens: usage.completion_tokens || usage.output_tokens || 0,
-    },
+    usage: usageObj,
   };
 }
