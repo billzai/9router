@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
+import QuotaWindowTimeline from "@/shared/components/QuotaWindowTimeline";
 import QuotaTable from "./QuotaTable";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
@@ -232,6 +233,7 @@ export default function ProviderLimits() {
   const [singleCheckingInId, setSingleCheckingInId] = useState(null);
   const [compensationLoading, setCompensationLoading] = useState(false);
   const [singleCompensatingId, setSingleCompensatingId] = useState(null);
+  const [viewMode, setViewMode] = useState("cards");
 
   const intervalRef = useRef(null);
   const countdownRef = useRef(null);
@@ -1289,11 +1291,48 @@ export default function ProviderLimits() {
               refresh
             </span>
           </button>
+
+          {/* View mode toggle (Cards vs Timeline) */}
+          <div className="flex items-center rounded-lg border border-black/10 p-0.5 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+            <button
+              type="button"
+              onClick={() => setViewMode("cards")}
+              className={`flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-all ${
+                viewMode === "cards" ? "bg-white text-text-primary shadow-sm dark:bg-white/10" : "text-text-muted hover:text-text-primary"
+              }`}
+              title="卡片网格视图"
+            >
+              <span className="material-symbols-outlined text-[14px]">grid_view</span>
+              <span>卡片</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("timeline")}
+              className={`flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-all ${
+                viewMode === "timeline" ? "bg-white text-primary shadow-sm dark:bg-white/10" : "text-text-muted hover:text-text-primary"
+              }`}
+              title="配额窗口时间轴视图"
+            >
+              <span className="material-symbols-outlined text-[14px]">timeline</span>
+              <span>时间轴</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Provider cards: 2 columns, compact */}
-      {expiringFirst && (
+      {viewMode === "timeline" ? (
+        <div className="pt-2">
+          <QuotaWindowTimeline
+            providerFilter={providerFilter}
+            accountFilter={accountFilter}
+            refreshKey={lastUpdated?.getTime ? lastUpdated.getTime() : 0}
+            showTrackerLink={false}
+          />
+        </div>
+      ) : (
+        <>
+          {expiringFirst && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           Expiring-first currently reorders accounts inside the current page.
           Cross-page ordering still follows backend pagination.
@@ -1844,6 +1883,8 @@ export default function ProviderLimits() {
             </div>
           </div>
         </div>
+        </>
+      )}
 
       <ConfirmModal
         isOpen={Boolean(resetConfirmState)}
