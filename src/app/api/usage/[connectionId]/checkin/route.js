@@ -18,7 +18,7 @@ function getTodayString() {
   return `${year}-${month}-${day}`;
 }
 
-async function executeCheckinForConnection(connection) {
+export async function executeCheckinForConnection(connection) {
   const proxyConfig = await resolveConnectionProxyConfig(connection.providerSpecificData);
   const proxyOptions = {
     connectionProxyEnabled: proxyConfig.connectionProxyEnabled === true,
@@ -150,3 +150,6 @@ export async function POST(_request, { params }) {
     return NextResponse.json({ error: error.message || "Checkin failed" }, { status: 500 });
   }
 }
+
+export { getProviderConnections };
+

@@ -117,6 +117,15 @@ async function runHeavyStartup() {
   import("@/sse/services/backgroundTokenRefresh.js")
     .then(({ startBackgroundTokenRefresh }) => startBackgroundTokenRefresh())
     .catch((e) => console.log("[BackgroundTokenRefresh] scheduler start failed:", e.message));
+
+  // Background schedulers: Qoder & MiniMax daily benefits auto claim
+  import("@/sse/services/qoderCheckin.js")
+    .then(({ startQoderCheckin }) => startQoderCheckin())
+    .catch((e) => console.log("[QoderCheckin] scheduler start failed:", e.message));
+
+  import("@/sse/services/minimaxCheckin.js")
+    .then(({ startMinimaxCheckin }) => startMinimaxCheckin())
+    .catch((e) => console.log("[MinimaxCheckin] scheduler start failed:", e.message));
 }
 
 // Cheap local check: keeps the scheduler module (and its provider graph) unloaded

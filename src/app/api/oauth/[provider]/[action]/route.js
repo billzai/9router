@@ -297,6 +297,91 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
   try {
     const { provider, action } = await params;
+
+    // Zero-body actions
+    if (action === "checkin") {
+      if (provider === "codebuddy-cn") {
+        const { getProviderConnections } = await import("@/lib/localDb");
+        const { executeCheckinForConnection } = await import(
+          "@/app/api/usage/[connectionId]/checkin/route.js"
+        );
+        const allConnections = await getProviderConnections();
+        const cbcnConnections = (allConnections || []).filter(
+          (c) => c.provider === "codebuddy-cn" && c.isActive !== false && c.isActive !== 0
+        );
+
+        const results = {};
+        for (const conn of cbcnConnections) {
+          try {
+            const res = await executeCheckinForConnection(conn);
+            results[conn.id] = res;
+          } catch (err) {
+            results[conn.id] = {
+              id: conn.id,
+              name: conn.name || conn.email || conn.id,
+              ok: false,
+              already: false,
+              message: err.message,
+              checkedAt: new Date().toISOString(),
+            };
+          }
+        }
+        return NextResponse.json({ success: true, results });
+      }
+
+      if (provider === "qoder" || provider === "qoder-cn") {
+        const { runQoderCheckinTick } = await import("@/sse/services/qoderCheckin.js");
+        const results = await runQoderCheckinTick({ provider });
+        return NextResponse.json({ success: true, results });
+      }
+
+      if (provider === "minimax-code" || provider === "minimax-code-global") {
+        const { runMinimaxCheckinTick } = await import("@/sse/services/minimaxCheckin.js");
+        const results = await runMinimaxCheckinTick({ provider });
+        return NextResponse.json({ success: true, results });
+      }
+
+      return NextResponse.json(
+        { error: "Check-in not supported for " + provider },
+        { status: 400 }
+      );
+    }
+
+    if (action === "claim-compensation") {
+      if (provider === "codebuddy-cn") {
+        const { getProviderConnections } = await import("@/lib/localDb");
+        const { executeCompensationForConnection } = await import(
+          "@/app/api/usage/[connectionId]/compensation/route.js"
+        );
+        const allConnections = await getProviderConnections();
+        const cbcnConnections = (allConnections || []).filter(
+          (c) => c.provider === "codebuddy-cn" && c.isActive !== false && c.isActive !== 0
+        );
+
+        const results = {};
+        for (const conn of cbcnConnections) {
+          try {
+            const res = await executeCompensationForConnection(conn);
+            results[conn.id] = res;
+          } catch (err) {
+            results[conn.id] = {
+              id: conn.id,
+              name: conn.name || conn.id,
+              status: "failed",
+              error: err.message,
+              claimedAt: new Date().toISOString(),
+            };
+          }
+        }
+        return NextResponse.json({ success: true, results });
+      }
+
+      return NextResponse.json(
+        { error: "Claim compensation not supported for " + provider },
+        { status: 400 }
+      );
+    }
+
     let body;
     try {
       body = await request.json();
