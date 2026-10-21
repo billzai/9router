@@ -17,6 +17,9 @@
 export const QODER_REGION_INTL = "intl";
 export const QODER_REGION_CN = "cn";
 
+export const QODER_OPENAPI_BASE = "https://openapi.qoder.sh";
+export const QODER_CN_OPENAPI_BASE = "https://openapi.qoder.com.cn";
+
 // Per-region base URLs. CN serves job tokens (jt-...) from the same gateway
 // host — there is no api2-style split like intl's api2.qoder.sh.
 const QODER_REGION_BASES = {
