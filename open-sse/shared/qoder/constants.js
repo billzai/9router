@@ -17,9 +17,6 @@
 export const QODER_REGION_INTL = "intl";
 export const QODER_REGION_CN = "cn";
 
-export const QODER_OPENAPI_BASE = "https://openapi.qoder.sh";
-export const QODER_CN_OPENAPI_BASE = "https://openapi.qoder.com.cn";
-
 // Per-region base URLs. CN serves job tokens (jt-...) from the same gateway
 // host — there is no api2-style split like intl's api2.qoder.sh.
 const QODER_REGION_BASES = {
@@ -52,6 +49,7 @@ export function qoderRegionOf(providerId) {
 }
 
 export const QODER_OPENAPI_BASE = QODER_REGION_BASES[QODER_REGION_INTL].openApi;
+export const QODER_CN_OPENAPI_BASE = QODER_REGION_BASES[QODER_REGION_CN].openApi;
 export const QODER_CENTER_BASE = QODER_REGION_BASES[QODER_REGION_INTL].center;
 export const QODER_CHAT_BASE = QODER_REGION_BASES[QODER_REGION_INTL].chat;
 // Job-token (jt-...) traffic is rejected by api3 with "Login expired" (403);
