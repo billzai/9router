@@ -46,6 +46,7 @@ import AutoPingScheduleModal from "@/app/(dashboard)/dashboard/providers/[id]/Au
 import { getScheduleSlotLabels } from "@/shared/services/quotaPingSchedule";
 import { USAGE_SUPPORTED_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useNotificationStore } from "@/store/notificationStore";
 
 // Maps the stored providerSpecificData.authMethod to a human label for Kiro.
 // Values come from the Kiro connect flows: builder-id/idc (device code),
@@ -155,6 +156,7 @@ function formatTimeRemaining(value) {
 }
 
 export default function ProviderLimits() {
+  const notify = useNotificationStore();
   const { copied, copy } = useCopyToClipboard();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -228,6 +230,8 @@ export default function ProviderLimits() {
   });
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [singleCheckingInId, setSingleCheckingInId] = useState(null);
+  const [compensationLoading, setCompensationLoading] = useState(false);
+  const [singleCompensatingId, setSingleCompensatingId] = useState(null);
 
   const intervalRef = useRef(null);
   const countdownRef = useRef(null);
@@ -410,6 +414,92 @@ export default function ProviderLimits() {
       setSingleCheckingInId(null);
     }
   }, [singleCheckingInId, fetchQuota]);
+
+  const handleCompensationAll = useCallback(async () => {
+    if (compensationLoading) return;
+    setCompensationLoading(true);
+    try {
+      const res = await fetch("/api/usage/all/compensation", { method: "POST" });
+      const data = await res.json();
+      const summary = data?.summary;
+      if (summary) {
+        if (summary.claimed > 0) {
+          notify.success(
+            `成功为 ${summary.claimed} 个账号领取 +${summary.totalCredits || 0} 积分`,
+            "补偿领取成功"
+          );
+        } else if (summary.already > 0 && summary.claimed === 0 && summary.failed === 0) {
+          notify.info("所有账号均已领取过补偿或已无待领补偿", "领取结果");
+        } else if (summary.noActivity > 0 && summary.claimed === 0 && summary.failed === 0) {
+          notify.info("当前暂无补偿或礼包活动可参与", "暂无活动");
+        } else if (summary.failed > 0 && summary.claimed === 0) {
+          notify.error(data.error || "部分或全部账号领取失败，请检查账号状态", "领取失败");
+        } else {
+          notify.info(data.message || "领取请求已完成", "领取结果");
+        }
+      } else if (data?.error) {
+        notify.error(data.error, "领取失败");
+      }
+
+      const cbcnConns = connections.filter((c) => c.provider === "codebuddy-cn");
+      await Promise.all(
+        cbcnConns.map((c) => fetchQuota(c.id, c.provider, { force: true })),
+      );
+      setLastUpdated(new Date());
+    } catch (e) {
+      console.error("One-click compensation failed:", e);
+      notify.error(e.message || "一键领取补偿请求失败", "错误");
+    } finally {
+      setCompensationLoading(false);
+    }
+  }, [compensationLoading, connections, fetchQuota, notify]);
+
+  const handleCompensationSingle = useCallback(
+    async (connId) => {
+      if (singleCompensatingId) return;
+      setSingleCompensatingId(connId);
+      try {
+        const res = await fetch(`/api/usage/${connId}/compensation`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (data?.result) {
+          const r = data.result;
+          if (r.status === "claimed") {
+            notify.success(
+              `领取成功 +${r.claimedAmount || 0} 积分`,
+              r.name || "补偿领取"
+            );
+          } else if (r.status === "already") {
+            notify.info(
+              r.message || "该账号已领取过此补偿或礼包",
+              r.name || "提示"
+            );
+          } else if (r.status === "no-activity") {
+            notify.info(
+              r.message || "当前暂无可领取的补偿或礼包",
+              r.name || "暂无活动"
+            );
+          } else {
+            notify.error(
+              r.message || r.error || "补偿领取失败",
+              r.name || "领取失败"
+            );
+          }
+        } else if (data?.error) {
+          notify.error(data.error, "领取失败");
+        }
+        await fetchQuota(connId, "codebuddy-cn", { force: true });
+        setLastUpdated(new Date());
+      } catch (e) {
+        console.error(`Compensation failed for ${connId}:`, e);
+        notify.error(e.message || "领取请求失败", "错误");
+      } finally {
+        setSingleCompensatingId(null);
+      }
+    },
+    [singleCompensatingId, fetchQuota, notify],
+  );
 
   const cbcnConnections = useMemo(() => {
     return connections.filter((c) => c.provider === "codebuddy-cn");
@@ -1267,6 +1357,18 @@ export default function ProviderLimits() {
                   {checkinLoading ? "progress_activity" : cbcnSummary.allCheckedIn ? "done_all" : "task_alt"}
                 </span>
                 <span>{checkinLoading ? "签到中..." : cbcnSummary.allCheckedIn ? "全部已签到" : "一键每日签到"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCompensationAll}
+                disabled={compensationLoading}
+                className="flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 text-xs font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400 transition-all shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                title="一键领取所有账号活动补偿与礼包"
+              >
+                <span className={`material-symbols-outlined text-[16px] ${compensationLoading ? "animate-spin" : ""}`}>
+                  {compensationLoading ? "progress_activity" : "redeem"}
+                </span>
+                <span>{compensationLoading ? "领取中..." : "一键领取补偿"}</span>
               </button>
             </div>
           </div>

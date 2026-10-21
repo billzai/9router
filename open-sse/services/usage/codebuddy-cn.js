@@ -226,3 +226,215 @@ export async function dailyCheckinCodeBuddy(accessToken, apiKey, providerSpecifi
     message: lastError ? lastError.message : "Checkin failed",
   };
 }
+
+export function decodeJwtSub(jwt) {
+  if (!jwt || typeof jwt !== "string") return null;
+  try {
+    const parts = jwt.split(".");
+    if (parts.length < 2) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const jsonPayload = Buffer.from(pad, "base64").toString("utf-8");
+    const payload = JSON.parse(jsonPayload);
+    return payload.sub || payload.uid || payload.userId || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+const COMPENSATION_STATUS_URLS = [
+  "https://www.codebuddy.cn/billing/meter/compensation-status",
+  "https://copilot.tencent.com/billing/meter/compensation-status",
+];
+
+const GIFT_STATUS_URLS = [
+  "https://www.codebuddy.cn/billing/meter/check-gift-claimed",
+  "https://copilot.tencent.com/billing/meter/check-gift-claimed",
+];
+
+const CLAIM_COMPENSATION_URLS = [
+  "https://www.codebuddy.cn/billing/meter/claim-compensation",
+  "https://copilot.tencent.com/billing/meter/claim-compensation",
+];
+
+const CLAIM_GIFT_URLS = [
+  "https://www.codebuddy.cn/billing/meter/claim-gift",
+  "https://copilot.tencent.com/billing/meter/claim-gift",
+];
+
+async function postCnEndpoint(urls, headers, proxyOptions) {
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const response = await proxyAwareFetch(
+        url,
+        {
+          method: "POST",
+          headers,
+          body: "{}",
+        },
+        proxyOptions
+      );
+
+      const text = await response.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (_) {}
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        code: json?.code ?? json?.error_code,
+        msg: json?.msg ?? json?.message ?? text,
+        data: json?.data?.Response?.Data ?? json?.data ?? {},
+        raw: json,
+      };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  return {
+    ok: false,
+    status: 500,
+    code: -1,
+    msg: lastError ? lastError.message : "Request failed",
+    data: {},
+    raw: null,
+  };
+}
+
+export async function claimCodeBuddyCompensation(
+  accessToken,
+  apiKey,
+  providerSpecificData = {},
+  proxyOptions = null
+) {
+  const token = accessToken || apiKey;
+  if (!token) {
+    return { status: "unauthorized", code: 401, message: "CodeBuddy credential not available." };
+  }
+
+  const uid = providerSpecificData?.uid || decodeJwtSub(token);
+  const headers = {
+    ...(PROVIDERS[PROVIDER_ID]?.headers || {}),
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(uid ? { "X-User-Id": String(uid) } : {}),
+    ...(providerSpecificData?.enterpriseId
+      ? {
+          "X-Enterprise-Id": String(providerSpecificData.enterpriseId),
+          "X-Tenant-Id": String(providerSpecificData.enterpriseId),
+        }
+      : {}),
+    ...(providerSpecificData?.domain ? { "X-Domain": String(providerSpecificData.domain) } : {}),
+  };
+
+  // 1. 查询 COMPENSATION_STATUS_URLS
+  const compStatusRes = await postCnEndpoint(COMPENSATION_STATUS_URLS, headers, proxyOptions);
+  if (compStatusRes.status === 401 || compStatusRes.code === 401) {
+    return { status: "unauthorized", code: 401, message: compStatusRes.msg || "CodeBuddy CN credential invalid or expired." };
+  }
+
+  // 2. 查询 GIFT_STATUS_URLS (best-effort)
+  let giftStatusRes = null;
+  try {
+    giftStatusRes = await postCnEndpoint(GIFT_STATUS_URLS, headers, proxyOptions);
+    if (giftStatusRes.status === 401 || giftStatusRes.code === 401) {
+      return { status: "unauthorized", code: 401, message: giftStatusRes.msg || "CodeBuddy CN credential invalid or expired." };
+    }
+  } catch (_) {}
+
+  if (!compStatusRes.ok && compStatusRes.status !== 200) {
+    return {
+      status: "failed",
+      error: compStatusRes.msg || `http_${compStatusRes.status}`,
+      message: `Failed to query compensation status: ${compStatusRes.msg || compStatusRes.status}`,
+    };
+  }
+
+  const compData = compStatusRes.data || {};
+  const giftData = giftStatusRes?.data || {};
+
+  let totalClaimed = 0;
+  const claimedDetails = [];
+  let anyClaimFailed = false;
+  let lastClaimError = null;
+
+  // 3. 如果 compData.active === true && !compData.claimed
+  if (compData.active === true && !compData.claimed) {
+    const claimRes = await postCnEndpoint(CLAIM_COMPENSATION_URLS, headers, proxyOptions);
+    if (claimRes.status === 401 || claimRes.code === 401) {
+      return { status: "unauthorized", code: 401, message: claimRes.msg || "CodeBuddy CN credential invalid or expired." };
+    }
+    if (claimRes.ok && (claimRes.code === 0 || claimRes.code === "0")) {
+      const amount = Number(claimRes.data?.credit_num || compData.credit_num || compData.amount || 0);
+      totalClaimed += amount;
+      claimedDetails.push({ type: "compensation", amount, endTime: compData.end_time || null });
+    } else {
+      anyClaimFailed = true;
+      lastClaimError = claimRes.msg || `http_${claimRes.status}`;
+    }
+  }
+
+  // 4. 如果 giftData.active === true && !giftData.claimed
+  if (giftData.active === true && !giftData.claimed) {
+    const giftClaimRes = await postCnEndpoint(CLAIM_GIFT_URLS, headers, proxyOptions);
+    if (giftClaimRes.status === 401 || giftClaimRes.code === 401) {
+      return { status: "unauthorized", code: 401, message: giftClaimRes.msg || "CodeBuddy CN credential invalid or expired." };
+    }
+    if (giftClaimRes.ok && (giftClaimRes.code === 0 || giftClaimRes.code === "0")) {
+      const amount = Number(giftClaimRes.data?.credit_num || giftData.credit_num || giftData.amount || 0);
+      totalClaimed += amount;
+      claimedDetails.push({ type: "gift", amount, endTime: giftData.end_time || null });
+    } else {
+      anyClaimFailed = true;
+      lastClaimError = giftClaimRes.msg || `http_${giftClaimRes.status}`;
+    }
+  }
+
+  // 5. 累计 claimedAmount 并返回统一状态
+  if (totalClaimed > 0) {
+    return {
+      status: "claimed",
+      claimedAmount: totalClaimed,
+      details: claimedDetails,
+      message: `成功领取 ${totalClaimed} 积分/额度`,
+    };
+  }
+
+  if (anyClaimFailed) {
+    return {
+      status: "failed",
+      error: lastClaimError || "claim_failed",
+      message: `领取失败: ${lastClaimError || "claim_failed"}`,
+    };
+  }
+
+  const isCompAlready = compData.claimed === true || (compData.active === true && compData.claimed);
+  const isGiftAlready = giftData.claimed === true || (giftData.active === true && giftData.claimed);
+  if (isCompAlready || isGiftAlready) {
+    return {
+      status: "already",
+      claimedAmount: 0,
+      message: "补偿与礼包已全部领取",
+    };
+  }
+
+  if (compData.active === false && (!giftData || giftData.active === false)) {
+    return {
+      status: "no-activity",
+      claimedAmount: 0,
+      message: "当前暂无补偿或礼包活动",
+    };
+  }
+
+  return {
+    status: "already",
+    claimedAmount: 0,
+    message: "已领取或无需重复领取",
+  };
+}

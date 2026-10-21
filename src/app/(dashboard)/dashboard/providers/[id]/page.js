@@ -90,6 +90,7 @@ export default function ProviderDetailPage() {
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
   const [syncingCodebuddyModels, setSyncingCodebuddyModels] = useState(false);
+  const [cbCompRunning, setCbCompRunning] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -803,6 +804,30 @@ export default function ProviderDetailPage() {
     }
   };
 
+  const handleCodeBuddyCompensation = async () => {
+    setCbCompRunning(true);
+    try {
+      const res = await fetch("/api/oauth/codebuddy-cn/claim-compensation", {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
+      const list = Array.isArray(data?.results) ? data.results : Object.values(data?.results || {});
+      const claimedList = list.filter((r) => r.status === "claimed");
+      const totalCredits = claimedList.reduce((acc, cur) => acc + (cur.claimedAmount || 0), 0);
+      if (claimedList.length > 0) {
+        alert(`${translate("Claim successful")}: +${totalCredits} Credits (${claimedList.length} accounts)`);
+      } else {
+        alert(translate("Compensation credits already claimed") || "补偿积分已全部领取或暂无活动");
+      }
+    } catch (e) {
+      alert((translate("Claim failed") || "领取失败") + ": " + e.message);
+    } finally {
+      setCbCompRunning(false);
+    }
+  };
+
   // Auto-sync CodeBuddy CN models if last sync was > 24 hours ago (User Decision 6B & 8B)
   useEffect(() => {
     if (providerId !== "codebuddy-cn") return;
@@ -1423,6 +1448,21 @@ export default function ProviderDetailPage() {
               {syncingCodebuddyModels ? "progress_activity" : "sync"}
             </span>
             {syncingCodebuddyModels ? translate("Syncing...") : translate("Sync Upstream Models")}
+          </button>
+        )}
+
+        {/* Claim CodeBuddy CN compensation button */}
+        {providerId === "codebuddy-cn" && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleCodeBuddyCompensation}
+            disabled={cbCompRunning}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-amber-500/40 px-3 py-2 text-xs text-amber-600 dark:text-amber-400 transition-colors hover:border-amber-500 hover:bg-amber-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            title="领取活动补偿与额外礼包"
+          >
+            <span className="material-symbols-outlined text-sm" style={cbCompRunning ? { animation: "spin 1s linear infinite" } : undefined}>
+              {cbCompRunning ? "progress_activity" : "redeem"}
+            </span>
+            {cbCompRunning ? (translate("Claiming...") || "领取中...") : (translate("Claim Compensation") || "领取补偿")}
           </button>
         )}
 

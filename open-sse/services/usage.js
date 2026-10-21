@@ -10,8 +10,8 @@ import { getCodexUsage, consumeCodexRateLimitResetCredit, getCodexRateLimitReset
 export { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits, consumeClaudeResetGrant };
 import { getKiroUsage } from "./usage/kiro.js";
 import { getMiniMaxUsage } from "./usage/minimax.js";
-import { getCodeBuddyCnUsage, getCodeBuddyIntlUsage, dailyCheckinCodeBuddy } from "./usage/codebuddy-cn.js";
-export { dailyCheckinCodeBuddy };
+import { getCodeBuddyCnUsage, getCodeBuddyIntlUsage, dailyCheckinCodeBuddy, claimCodeBuddyCompensation } from "./usage/codebuddy-cn.js";
+export { dailyCheckinCodeBuddy, claimCodeBuddyCompensation };
 import { getGrokCliUsage } from "./usage/grok-cli.js";
 import { getKimiUsage } from "./usage/kimi.js";
 import { getDeepseekUsage } from "./usage/deepseek.js";
