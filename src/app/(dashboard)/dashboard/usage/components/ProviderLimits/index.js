@@ -518,7 +518,8 @@ export default function ProviderLimits() {
     for (const conn of cbcnConnections) {
       const q = quotaData[conn.id];
       const rec = checkins[conn.id];
-      const isChecked = rec && (rec.date === todayString || !rec.date) && (rec.ok || rec.already);
+      const isEnt = Boolean(rec?.isEnterprise) || Boolean(q?.raw?.isEnterprise) || String(q?.raw?.plan || "").includes("教育") || String(q?.raw?.plan || "").includes("公益") || String(q?.raw?.plan || "").includes("企业");
+      const isChecked = isEnt || (rec && (rec.date === todayString || !rec.date) && (rec.ok || rec.already));
       if (isChecked) {
         checkedInCount += 1;
       }
@@ -1435,11 +1436,20 @@ export default function ProviderLimits() {
           const isCbcn = conn.provider === "codebuddy-cn";
           const cbcnCredits = isCbcn ? getCodeBuddyCredits(quota) : null;
           const cbcnCheckinRecord = isCbcn ? checkins[conn.id] : null;
+          const isCbcnEnterprise = isCbcn && (
+            Boolean(cbcnCheckinRecord?.isEnterprise) ||
+            Boolean(quota?.raw?.isEnterprise) ||
+            String(quota?.raw?.plan || "").includes("教育") ||
+            String(quota?.raw?.plan || "").includes("公益") ||
+            String(quota?.raw?.plan || "").includes("企业")
+          );
           const isCbcnCheckedIn =
             isCbcn &&
-            cbcnCheckinRecord &&
-            (cbcnCheckinRecord.date === todayString || !cbcnCheckinRecord.date) &&
-            (cbcnCheckinRecord.ok || cbcnCheckinRecord.already);
+            (isCbcnEnterprise || (
+              cbcnCheckinRecord &&
+              (cbcnCheckinRecord.date === todayString || !cbcnCheckinRecord.date) &&
+              (cbcnCheckinRecord.ok || cbcnCheckinRecord.already)
+            ));
           const isCheckingInThis = singleCheckingInId === conn.id;
 
           return (
@@ -1696,7 +1706,12 @@ export default function ProviderLimits() {
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          {isCbcnCheckedIn ? (
+                          {isCbcnEnterprise ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400" title="企业/教育版账号直接享有固定月度配额，无需每日签到">
+                              <span className="material-symbols-outlined text-[13px]">school</span>
+                              <span>免签到</span>
+                            </span>
+                          ) : isCbcnCheckedIn ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                               <span className="material-symbols-outlined text-[13px]">check_circle</span>
                               <span>今日已签到</span>

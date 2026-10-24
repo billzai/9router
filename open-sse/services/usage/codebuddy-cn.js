@@ -31,6 +31,83 @@ function num(precise, plain) {
   return Number.isFinite(n) ? n : 0;
 }
 
+export async function getEnterpriseUsage(token, enterpriseId, proxyOptions = null) {
+  if (!token) return null;
+  const urls = [
+    "https://copilot.tencent.com/v2/billing/meter/get-enterprise-user-usage",
+    "https://www.codebuddy.cn/billing/meter/get-enterprise-user-usage",
+  ];
+  const headers = {
+    ...(PROVIDERS[PROVIDER_ID]?.headers || {}),
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(enterpriseId
+      ? {
+          "X-Enterprise-Id": String(enterpriseId),
+          "X-Tenant-Id": String(enterpriseId),
+        }
+      : {}),
+  };
+
+  for (const url of urls) {
+    try {
+      const response = await proxyAwareFetch(
+        url,
+        {
+          method: "POST",
+          headers,
+          body: "{}",
+        },
+        proxyOptions
+      );
+      if (!response.ok && response.status !== 200) continue;
+      const json = await response.json();
+      if (json?.code === 0 || json?.code === "0" || !json?.code) {
+        const data = json?.data?.Response?.Data ?? json?.data;
+        if (data && (data.credit !== undefined || data.limitNum !== undefined)) {
+          return data;
+        }
+        if (data) return data;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+export async function getEnterpriseName(token, proxyOptions = null) {
+  if (!token) return null;
+  const urls = [
+    "https://www.codebuddy.cn/console/accounts",
+    "https://copilot.tencent.com/console/accounts",
+  ];
+  const headers = {
+    ...(PROVIDERS[PROVIDER_ID]?.headers || {}),
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+
+  for (const url of urls) {
+    try {
+      const response = await proxyAwareFetch(
+        url,
+        {
+          method: "GET",
+          headers,
+        },
+        proxyOptions
+      );
+      if (!response.ok && response.status !== 200) continue;
+      const json = await response.json();
+      const accounts = json?.data?.accounts || json?.accounts;
+      if (Array.isArray(accounts) && accounts[0]?.enterpriseName) {
+        return accounts[0].enterpriseName;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 // Label a refill pack by its cycle length (Monthly is the common CodeBuddy case).
 function refillCadence(acc) {
   const start = parseResetTime(acc.CycleStartTime);
@@ -76,6 +153,34 @@ async function getCodeBuddyUsage(providerId, accessToken, apiKey, providerSpecif
     const data = json?.data?.Response?.Data || {};
     const accounts = Array.isArray(data.Accounts) ? data.Accounts : [];
     if (accounts.length === 0) {
+      const payload = decodeJwtPayload(token);
+      const enterpriseId = payload?.enterprise_id || payload?.enterpriseId || providerSpecificData?.enterpriseId;
+      const entData = await getEnterpriseUsage(token, enterpriseId, proxyOptions);
+      if (entData && (entData.limitNum !== undefined || entData.credit !== undefined)) {
+        const used = num(entData.credit, 0);
+        const total = num(entData.limitNum, 2000);
+        const totalRemaining = total - used;
+        const resetAt = parseResetTime(entData.cycleResetTime || entData.cycleEndTime);
+        const plan = (await getEnterpriseName(token, proxyOptions)) || "WorkBuddy教育公益版";
+        return {
+          plan,
+          isEnterprise: true,
+          quotas: {
+            Monthly: {
+              used,
+              total,
+              resetAt,
+              unlimited: false,
+              recurring: true,
+            },
+          },
+          summary: {
+            totalCapacity: total,
+            totalUsed: used,
+            totalRemaining,
+          },
+        };
+      }
       return { message: "CodeBuddy CN connected. No credit package found." };
     }
 
@@ -172,6 +277,18 @@ export async function dailyCheckinCodeBuddy(accessToken, apiKey, providerSpecifi
     return { ok: false, message: "CodeBuddy credential not available." };
   }
 
+  const jwtPayload = decodeJwtPayload(token);
+  const enterpriseId = jwtPayload?.enterprise_id || jwtPayload?.enterpriseId || providerSpecificData?.enterpriseId;
+  if (enterpriseId) {
+    return {
+      ok: true,
+      already: true,
+      isEnterprise: true,
+      code: 0,
+      message: "企业/教育版账号直接享有固定月度配额，无需每日签到",
+    };
+  }
+
   const endpoints = [
     "https://www.codebuddy.cn/v2/billing/meter/daily-checkin",
     "https://copilot.tencent.com/v2/billing/meter/daily-checkin",
@@ -207,6 +324,15 @@ export async function dailyCheckinCodeBuddy(accessToken, apiKey, providerSpecifi
 
       const code = json?.code;
       const msg = json?.msg || text;
+      if (code === 10001 && typeof msg === "string" && msg.includes("企业账号不支持")) {
+        return {
+          ok: true,
+          already: true,
+          isEnterprise: true,
+          code: 0,
+          message: "企业/教育版账号直接享有固定月度配额，无需每日签到",
+        };
+      }
       const isAlready = code === 10001 || /已签到|已领取|已经.*(?:签到|领取)|重复签到|already/i.test(msg);
       const isSuccess = (code === 0 && response.ok) || isAlready;
 
@@ -227,20 +353,24 @@ export async function dailyCheckinCodeBuddy(accessToken, apiKey, providerSpecifi
   };
 }
 
-export function decodeJwtSub(jwt) {
-  if (!jwt || typeof jwt !== "string") return null;
+export function decodeJwtPayload(jwt) {
+  if (!jwt || typeof jwt !== "string") return {};
   try {
     const parts = jwt.split(".");
-    if (parts.length < 2) return null;
+    if (parts.length < 2) return {};
     const base64Url = parts[1];
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const pad = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
     const jsonPayload = Buffer.from(pad, "base64").toString("utf-8");
-    const payload = JSON.parse(jsonPayload);
-    return payload.sub || payload.uid || payload.userId || null;
+    return JSON.parse(jsonPayload) || {};
   } catch (_) {
-    return null;
+    return {};
   }
+}
+
+export function decodeJwtSub(jwt) {
+  const payload = decodeJwtPayload(jwt);
+  return payload.sub || payload.uid || payload.userId || null;
 }
 
 const COMPENSATION_STATUS_URLS = [
@@ -315,6 +445,17 @@ export async function claimCodeBuddyCompensation(
   const token = accessToken || apiKey;
   if (!token) {
     return { status: "unauthorized", code: 401, message: "CodeBuddy credential not available." };
+  }
+
+  const jwtPayload = decodeJwtPayload(token);
+  const enterpriseId = jwtPayload?.enterprise_id || jwtPayload?.enterpriseId || providerSpecificData?.enterpriseId;
+  if (enterpriseId) {
+    return {
+      status: "already",
+      claimedAmount: 0,
+      isEnterprise: true,
+      message: "企业/教育版账号无需领取个人活动补偿",
+    };
   }
 
   const uid = providerSpecificData?.uid || decodeJwtSub(token);

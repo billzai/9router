@@ -51,6 +51,7 @@ export async function executeCheckinForConnection(connection) {
     checkedAt: new Date().toISOString(),
     ok: Boolean(result.ok),
     already: Boolean(result.already),
+    isEnterprise: Boolean(result.isEnterprise),
     code: result.code ?? null,
     message: result.message || "",
   };
