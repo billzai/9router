@@ -27,6 +27,20 @@ function parseKiroQuotaData(data) {
       unlimited: false,
     };
 
+    // Add bonuses if available (promo credits, gift packs)
+    if (Array.isArray(breakdown.bonuses)) {
+      breakdown.bonuses.forEach((b, i) => {
+        const u = b.currentUsageWithPrecision ?? b.currentUsage ?? 0;
+        const t = b.usageLimitWithPrecision ?? b.usageLimit ?? 0;
+        const n = b.displayName || b.bonusCode || `Pack ${i + 1}`;
+        quotaInfo[`Bonus (${n})`] = {
+          used: u, total: t, remaining: Math.max(0, t - u),
+          resetAt: parseResetTime(b.expiresAt) || resetAt,
+          unlimited: false, recurring: false,
+        };
+      });
+    }
+
     // Add free trial if available
     if (breakdown.freeTrialInfo) {
       const freeUsed = breakdown.freeTrialInfo.currentUsageWithPrecision || 0;
