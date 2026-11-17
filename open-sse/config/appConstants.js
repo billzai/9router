@@ -191,6 +191,14 @@ export const ANTIGRAVITY_PROMPT_REWRITES = [
   // but OpenAI-format clients (e.g. proxies that convert Claude Code to /v1/chat/completions)
   // pass it through, and any system text containing it gets a fake 429 RESOURCE_EXHAUSTED.
   { from: /^x-anthropic-billing-header:[^\n]*(?:\r?\n)*/gim, to: "" },
+  // 2026-11-17: upstream now strips zero-width chars (U+200B) before scanning
+  // systemInstruction for third-party agent fingerprints, so obfuscation alone no
+  // longer prevents the fake 429 RESOURCE_EXHAUSTED (see CLIProxyAPI issue #7433).
+  // Replace the "You are Claude Code" identity line with a neutral assistant
+  // description, and drop RFC-2119 rule lines (MUST/REQUIRED/SHOULD) that the
+  // keyword filter also keys on. User messages are not affected.
+  { from: /You are Claude Code[^\n]*/gi, to: "You are a helpful AI coding assistant." },
+  { from: /^\s*[^\n]*\b(?:MUST|REQUIRED|SHOULD)\b[^\n]*(?:\r?\n)?/gim, to: "" },
   { from: /opencode/gi, to: (m) => (m === "OpenCode" ? "Antigravity" : m === "OPENCODE" ? "ANTIGRAVITY" : "antigravity") }
 ];
 
